@@ -54,3 +54,7 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Attribution
+
+The app icon and in-app chess pieces use the standard piece set by Colin M.L. Burnett (cburnett), from [Wikimedia Commons](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces), licensed CC BY-SA 3.0 / GFDL.

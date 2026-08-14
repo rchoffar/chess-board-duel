@@ -5,6 +5,8 @@ import {
   startingOccupancy,
   diffOccupancy,
   occupancyEquals,
+  rotateOccupancy,
+  rotateSquare,
   squareName,
   squareIndex,
   isBoardFrame,
@@ -97,6 +99,26 @@ describe('square helpers', () => {
     for (let i = 0; i < 64; i++) {
       expect(squareIndex(squareName(i))).toBe(i);
     }
+  });
+});
+
+describe('rotation helpers (flipped board orientation)', () => {
+  it('rotates squares 180°', () => {
+    expect(rotateSquare('e2')).toBe('d7');
+    expect(rotateSquare('a1')).toBe('h8');
+    expect(rotateSquare('h1')).toBe('a8');
+    for (let i = 0; i < 64; i++) {
+      expect(rotateSquare(rotateSquare(squareName(i)))).toBe(squareName(i));
+    }
+  });
+
+  it('a rotated starting position normalizes back to the standard one', () => {
+    const physical = rotateOccupancy(startingOccupancy()); // white pieces on ranks 7-8
+    // 180° rotation mirrors files too: the white king (e1) lands on d8.
+    expect(physical[squareIndex('d8')]).toBe('K');
+    expect(physical[squareIndex('e8')]).toBe('Q');
+    expect(physical[squareIndex('d1')]).toBe('k');
+    expect(rotateOccupancy(physical)).toEqual(startingOccupancy());
   });
 });
 

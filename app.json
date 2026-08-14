@@ -1,26 +1,34 @@
 {
   "expo": {
-    "name": "Chessnut Local",
-    "slug": "chessnut-local",
+    "name": "Chess Board Duel",
+    "slug": "chess-board-duel",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "chessnutlocal",
+    "scheme": "chessboardduel",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0A0A0F",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "fr.remy.chessnutlocal",
-      "appleTeamId": "J9M3DDY93R"
+      "bundleIdentifier": "fr.remy.chessboardduel",
+      "appleTeamId": "J9M3DDY93R",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "fr.remy.chessnutlocal",
+      "package": "fr.remy.chessboardduel",
       "adaptiveIcon": {
         "backgroundColor": "#0A0A0F",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT"
+      ]
     },
     "web": {
       "output": "static",
@@ -40,8 +48,10 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "modes": ["central"],
-          "bluetoothAlwaysPermission": "Chessnut Local uses Bluetooth to connect to your Chessnut chess board."
+          "modes": [
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "Chess Board Duel uses Bluetooth to connect to your Chessnut chess board."
         }
       ],
       "expo-sqlite"
@@ -49,6 +59,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ea1da03f-b0ff-4ab3-a24c-8387269ef1c0"
+      }
+    },
+    "owner": "rchoffar"
   }
 }

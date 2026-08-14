@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { House, History } from 'lucide-react-native';
+import { House, History, Settings, Users } from 'lucide-react-native';
 import { FloatingTabBar } from '../../components/ui/FloatingTabBar';
 
 export default function TabLayout() {
@@ -23,6 +23,20 @@ export default function TabLayout() {
         options={{
           title: 'History',
           tabBarIcon: ({ color, size }) => <History size={size} color={color} strokeWidth={2} />,
+        }}
+      />
+      <Tabs.Screen
+        name="players"
+        options={{
+          title: 'Players',
+          tabBarIcon: ({ color, size }) => <Users size={size} color={color} strokeWidth={2} />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, size }) => <Settings size={size} color={color} strokeWidth={2} />,
         }}
       />
     </Tabs>

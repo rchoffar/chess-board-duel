@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ChessnutBoard, type BoardStatus } from '../ble/ChessnutBoard';
 import type { BatteryStatus, Occupancy } from '../ble/protocol';
+import { useSettingsStore } from './useSettingsStore';
 
 type FrameListener = (occupancy: Occupancy, receivedAt: number) => void;
 
@@ -26,8 +27,14 @@ let board: ChessnutBoard;
 
 export const useBoardStore = create<BoardState>((set, get) => {
   board = new ChessnutBoard({
-    onStatus: (status, deviceName) =>
-      set({ status, deviceName: deviceName ?? (status === 'idle' ? null : get().deviceName) }),
+    onStatus: (status, deviceName) => {
+      const wasConnected = get().status === 'connected';
+      set({ status, deviceName: deviceName ?? (status === 'idle' ? null : get().deviceName) });
+      // Buzz on every fresh connection (including auto-reconnects).
+      if (status === 'connected' && !wasConnected && useSettingsStore.getState().boardSounds) {
+        void board.beep(1000, 150);
+      }
+    },
     onFrame: (occupancy, receivedAt) => {
       set({ lastOccupancy: occupancy });
       for (const listener of frameListeners) listener(occupancy, receivedAt);

@@ -13,7 +13,7 @@ interface ThemeValue {
 
 const ThemeContext = createContext<ThemeValue | null>(null);
 
-// Chessnut Local is dark-only by design.
+// Chess Board Duel is dark-only by design.
 const SCHEME: ColorScheme = 'dark';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {

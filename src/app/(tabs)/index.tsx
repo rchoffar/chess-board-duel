@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,9 +9,9 @@ import { SectionLabel } from '../../components/ui/SectionLabel';
 import { fontFamily, fontSize, radius, spacing } from '../../design-system/theme';
 import { useTheme } from '../../design-system/ThemeProvider';
 import { useBoardStore } from '../../store/useBoardStore';
-import { useFocusAnimKey } from '../../hooks/useFocusAnimKey';
-import { listGames, type GameRecord } from '../../db/games';
-import { timeControlLabel } from '../../chess/clock';
+import { useIsActiveTab } from '../../hooks/useIsActiveTab';
+import { listGames, timeControlsOf, type GameRecord } from '../../db/games';
+import { timeControlsLabel } from '../../chess/clock';
 
 const enter = (delay: number) => FadeInDown.delay(delay).springify().damping(18).stiffness(140);
 
@@ -19,7 +19,7 @@ export default function HomeScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const animKey = useFocusAnimKey();
+  const isActive = useIsActiveTab();
 
   const status = useBoardStore((s) => s.status);
   const deviceName = useBoardStore((s) => s.deviceName);
@@ -38,19 +38,12 @@ export default function HomeScreen() {
   const connected = status === 'connected';
   const busy = status === 'scanning' || status === 'connecting';
 
-  return (
-    <ScrollView
-      key={animKey}
-      style={styles.screen}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.lg, paddingBottom: 120 }]}
-      showsVerticalScrollIndicator={false}
-    >
-      <Animated.View entering={enter(0)}>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>Play</Text>
-      </Animated.View>
+  if (!isActive) return <View style={styles.screen} />;
 
-      <Animated.View entering={enter(60)}>
-        <SectionLabel style={styles.sectionLabel}>Board</SectionLabel>
+  return (
+    <View style={styles.screen}>
+      {/* Connection card pinned above the scrolling content */}
+      <View style={[styles.stickyHeader, { paddingTop: insets.top + spacing.md }]}>
         <GlassCard variant="dark">
           <View style={styles.connectionRow}>
             <View style={[styles.iconTile, { backgroundColor: connected ? colors.accentTint : colors.neutralTileBg }]}>
@@ -83,20 +76,31 @@ export default function HomeScreen() {
               disabled={busy}
               activeOpacity={0.8}
             >
-              <Text style={[styles.connectBtnText, { color: connected ? colors.onDarkPrimary : '#0A0A0F' }]}>
-                {connected ? 'Disconnect' : busy ? '…' : 'Connect'}
-              </Text>
+              {busy ? (
+                <ActivityIndicator size="small" color="#0A0A0F" />
+              ) : (
+                <Text style={[styles.connectBtnText, { color: connected ? colors.onDarkPrimary : '#0A0A0F' }]}>
+                  {connected ? 'Disconnect' : 'Connect'}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </GlassCard>
-      </Animated.View>
+      </View>
 
-      <Animated.View entering={enter(120)}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingBottom: 120 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View entering={enter(0)}>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>Play</Text>
+        </Animated.View>
+
+        <Animated.View entering={enter(60)}>
         <TouchableOpacity
           activeOpacity={0.85}
-          disabled={!connected}
           onPress={() => router.push('/new-game')}
-          style={!connected && styles.disabled}
         >
           <GlassCard variant="dark">
             <View style={styles.ctaRow}>
@@ -106,7 +110,7 @@ export default function HomeScreen() {
               <View style={styles.connectionInfo}>
                 <Text style={[styles.ctaTitle, { color: colors.onDarkPrimary }]}>New game</Text>
                 <Text style={[styles.connectionSub, { color: colors.onDarkSecondary }]}>
-                  {connected ? 'Two players, over the board' : 'Connect the board first'}
+                  {connected ? 'Two players, over the board' : "Board not connected — moves won't be detected"}
                 </Text>
               </View>
               <ChevronRight size={20} color={colors.onDarkTertiary} strokeWidth={2} />
@@ -115,31 +119,32 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      {recentGames.length > 0 && (
-        <Animated.View entering={enter(180)}>
-          <SectionLabel style={styles.sectionLabel}>Recent games</SectionLabel>
-          <View style={styles.recentList}>
-            {recentGames.map((game) => (
-              <TouchableOpacity key={game.id} activeOpacity={0.8} onPress={() => router.push(`/game/${game.id}`)}>
-                <GlassCard padding={0}>
-                  <View style={styles.recentRow}>
-                    <View style={styles.connectionInfo}>
-                      <Text style={[styles.recentTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-                        {game.white} vs {game.black}
-                      </Text>
-                      <Text style={[styles.connectionSub, { color: colors.textTertiary }]}>
-                        {new Date(game.startedAt).toLocaleDateString()} · {timeControlLabel({ baseMinutes: game.baseMinutes, incrementSeconds: game.incrementSeconds })}
-                      </Text>
+        {recentGames.length > 0 && (
+          <Animated.View entering={enter(180)}>
+            <SectionLabel style={styles.sectionLabel}>Recent games</SectionLabel>
+            <View style={styles.recentList}>
+              {recentGames.map((game) => (
+                <TouchableOpacity key={game.id} activeOpacity={0.8} onPress={() => router.push(`/game/${game.id}`)}>
+                  <GlassCard padding={0}>
+                    <View style={styles.recentRow}>
+                      <View style={styles.connectionInfo}>
+                        <Text style={[styles.recentTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                          {game.white} vs {game.black}
+                        </Text>
+                        <Text style={[styles.connectionSub, { color: colors.textTertiary }]}>
+                          {new Date(game.startedAt).toLocaleDateString()} · {timeControlsLabel(timeControlsOf(game))}
+                        </Text>
+                      </View>
+                      <Text style={[styles.recentResult, { color: colors.accent }]}>{game.result}</Text>
                     </View>
-                    <Text style={[styles.recentResult, { color: colors.accent }]}>{game.result}</Text>
-                  </View>
-                </GlassCard>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
-      )}
-    </ScrollView>
+                  </GlassCard>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Animated.View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -147,8 +152,16 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
+  stickyHeader: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  scroll: {
+    flex: 1,
+  },
   content: {
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
     gap: spacing.lg,
   },
   title: {
@@ -210,9 +223,6 @@ const styles = StyleSheet.create({
   connectBtnText: {
     fontSize: fontSize.sm,
     fontFamily: fontFamily.bold,
-  },
-  disabled: {
-    opacity: 0.5,
   },
   recentList: {
     gap: spacing.md,

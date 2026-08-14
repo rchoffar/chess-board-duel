@@ -1,5 +1,6 @@
-import * as SQLite from 'expo-sqlite';
-import type { TimeControl } from '../chess/clock';
+import { isSymmetric, type PlayerTimeControls } from '../chess/clock';
+import type { Variant } from '../chess/chess960';
+import { getDb } from './db';
 
 export interface GameRecord {
   id: number;
@@ -7,36 +8,36 @@ export interface GameRecord {
   endedAt: number | null;
   white: string;
   black: string;
+  whiteId: number | null;
+  blackId: number | null;
+  /** White's control. */
   baseMinutes: number;
   incrementSeconds: number;
+  /** Black's control; NULL = same as White (all legacy rows). */
+  blackBaseMinutes: number | null;
+  blackIncrementSeconds: number | null;
+  variant: Variant;
+  /** Chess960 start position (KQkq X-FEN); NULL for standard games. */
+  startFen: string | null;
   result: string; // '1-0' | '0-1' | '1/2-1/2' | '*'
   termination: string | null;
   moveCount: number;
   pgn: string;
 }
 
-let db: SQLite.SQLiteDatabase | null = null;
-
-function getDb(): SQLite.SQLiteDatabase {
-  if (!db) {
-    db = SQLite.openDatabaseSync('chessnut-local.db');
-    db.execSync(`
-      CREATE TABLE IF NOT EXISTS games (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        startedAt INTEGER NOT NULL,
-        endedAt INTEGER,
-        white TEXT NOT NULL,
-        black TEXT NOT NULL,
-        baseMinutes INTEGER NOT NULL,
-        incrementSeconds INTEGER NOT NULL,
-        result TEXT NOT NULL DEFAULT '*',
-        termination TEXT,
-        moveCount INTEGER NOT NULL DEFAULT 0,
-        pgn TEXT NOT NULL DEFAULT ''
-      );
-    `);
-  }
-  return db;
+/** Reconstruct both sides' controls from a db row (legacy rows are symmetric). */
+export function timeControlsOf(
+  g: Pick<
+    GameRecord,
+    'baseMinutes' | 'incrementSeconds' | 'blackBaseMinutes' | 'blackIncrementSeconds'
+  >
+): PlayerTimeControls {
+  const w = { baseMinutes: g.baseMinutes, incrementSeconds: g.incrementSeconds };
+  const b =
+    g.blackBaseMinutes != null && g.blackIncrementSeconds != null
+      ? { baseMinutes: g.blackBaseMinutes, incrementSeconds: g.blackIncrementSeconds }
+      : w;
+  return { w, b };
 }
 
 /** Insert a new in-progress game row; returns its id. */
@@ -44,11 +45,31 @@ export function createGame(params: {
   startedAt: number;
   white: string;
   black: string;
-  timeControl: TimeControl;
+  whiteId: number | null;
+  blackId: number | null;
+  timeControls: PlayerTimeControls;
+  variant: Variant;
+  startFen: string | null;
 }): number {
+  const { timeControls: tcs } = params;
   const result = getDb().runSync(
-    `INSERT INTO games (startedAt, white, black, baseMinutes, incrementSeconds) VALUES (?, ?, ?, ?, ?)`,
-    [params.startedAt, params.white, params.black, params.timeControl.baseMinutes, params.timeControl.incrementSeconds]
+    `INSERT INTO games (startedAt, white, black, whiteId, blackId,
+       baseMinutes, incrementSeconds, blackBaseMinutes, blackIncrementSeconds,
+       variant, startFen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      params.startedAt,
+      params.white,
+      params.black,
+      params.whiteId,
+      params.blackId,
+      tcs.w.baseMinutes,
+      tcs.w.incrementSeconds,
+      isSymmetric(tcs) ? null : tcs.b.baseMinutes,
+      isSymmetric(tcs) ? null : tcs.b.incrementSeconds,
+      params.variant,
+      params.startFen,
+    ]
   );
   return Number(result.lastInsertRowId);
 }
@@ -70,6 +91,14 @@ export function finishGame(
 
 export function listGames(): GameRecord[] {
   return getDb().getAllSync<GameRecord>(`SELECT * FROM games ORDER BY startedAt DESC`);
+}
+
+/** Finished games involving a player, oldest first (stats work chronologically). */
+export function listGamesForPlayer(playerId: number): GameRecord[] {
+  return getDb().getAllSync<GameRecord>(
+    `SELECT * FROM games WHERE (whiteId = ? OR blackId = ?) ORDER BY startedAt ASC`,
+    [playerId, playerId]
+  );
 }
 
 export function getGame(id: number): GameRecord | null {

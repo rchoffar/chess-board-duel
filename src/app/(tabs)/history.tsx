@@ -7,8 +7,9 @@ import { Trophy, Minus, CircleDashed } from 'lucide-react-native';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { fontFamily, fontSize, radius, spacing } from '../../design-system/theme';
 import { useTheme } from '../../design-system/ThemeProvider';
-import { listGames, type GameRecord } from '../../db/games';
-import { timeControlLabel } from '../../chess/clock';
+import { listGames, timeControlsOf, type GameRecord } from '../../db/games';
+import { timeControlsLabel } from '../../chess/clock';
+import { useIsActiveTab } from '../../hooks/useIsActiveTab';
 
 const enter = (delay: number) => FadeInDown.delay(delay).springify().damping(18).stiffness(140);
 
@@ -23,12 +24,15 @@ export default function HistoryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [games, setGames] = useState<GameRecord[]>([]);
+  const isActive = useIsActiveTab();
 
   useFocusEffect(
     useCallback(() => {
       setGames(listGames());
     }, [])
   );
+
+  if (!isActive) return <View style={styles.screen} />;
 
   return (
     <View style={styles.screen}>
@@ -66,7 +70,7 @@ export default function HistoryScreen() {
                     </Text>
                     <Text style={[styles.meta, { color: colors.textTertiary }]}>
                       {new Date(item.startedAt).toLocaleDateString()} ·{' '}
-                      {timeControlLabel({ baseMinutes: item.baseMinutes, incrementSeconds: item.incrementSeconds })} ·{' '}
+                      {timeControlsLabel(timeControlsOf(item))} ·{' '}
                       {Math.ceil(item.moveCount / 2)} moves
                     </Text>
                   </View>

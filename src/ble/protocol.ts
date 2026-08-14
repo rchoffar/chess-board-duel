@@ -165,3 +165,17 @@ export function occupancyEquals(a: Occupancy, b: Occupancy): boolean {
   }
   return true;
 }
+
+/**
+ * Rotate an occupancy 180° (square i ↔ 63-i). Used when the players set up
+ * the game with white on the board's "black side": physical frames are
+ * rotated into logical coordinates and LED squares back into physical ones.
+ */
+export function rotateOccupancy(occ: Occupancy): Occupancy {
+  return [...occ].reverse();
+}
+
+/** The 180°-rotated counterpart of a square name ("e2" → "d7"). */
+export function rotateSquare(name: string): string {
+  return squareName(63 - squareIndex(name));
+}

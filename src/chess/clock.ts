@@ -7,6 +7,11 @@ export interface TimeControl {
   incrementSeconds: number;
 }
 
+export interface PlayerTimeControls {
+  w: TimeControl;
+  b: TimeControl;
+}
+
 export interface ClockState {
   whiteMs: number;
   blackMs: number;
@@ -16,9 +21,13 @@ export interface ClockState {
   turnStartedAt: number | null;
 }
 
-export function createClock(tc: TimeControl): ClockState {
-  const base = tc.baseMinutes * 60_000;
-  return { whiteMs: base, blackMs: base, running: null, turnStartedAt: null };
+export function createClock(tcs: PlayerTimeControls): ClockState {
+  return {
+    whiteMs: tcs.w.baseMinutes * 60_000,
+    blackMs: tcs.b.baseMinutes * 60_000,
+    running: null,
+    turnStartedAt: null,
+  };
 }
 
 export function startClock(clock: ClockState, color: Color, now: number): ClockState {
@@ -38,13 +47,13 @@ export function isFlagged(clock: ClockState, color: Color, now: number): boolean
 }
 
 /**
- * The running side completed a move: bank their remaining time, add the
+ * The running side completed a move: bank their remaining time, add their own
  * increment, and start the opponent's clock.
  */
-export function switchClock(clock: ClockState, tc: TimeControl, now: number): ClockState {
+export function switchClock(clock: ClockState, tcs: PlayerTimeControls, now: number): ClockState {
   if (clock.running === null || clock.turnStartedAt === null) return clock;
   const mover = clock.running;
-  const banked = remainingMs(clock, mover, now) + tc.incrementSeconds * 1000;
+  const banked = remainingMs(clock, mover, now) + tcs[mover].incrementSeconds * 1000;
   return {
     whiteMs: mover === 'w' ? banked : clock.whiteMs,
     blackMs: mover === 'b' ? banked : clock.blackMs,
@@ -87,4 +96,19 @@ export function timeControlTag(tc: TimeControl): string {
 /** Human label, e.g. "5+3". */
 export function timeControlLabel(tc: TimeControl): string {
   return `${tc.baseMinutes}+${tc.incrementSeconds}`;
+}
+
+/** True when both sides play the same control. */
+export function isSymmetric(tcs: PlayerTimeControls): boolean {
+  return (
+    tcs.w.baseMinutes === tcs.b.baseMinutes &&
+    tcs.w.incrementSeconds === tcs.b.incrementSeconds
+  );
+}
+
+/** "5+3", or "10+5 · 5+0" (White first) when the sides differ. */
+export function timeControlsLabel(tcs: PlayerTimeControls): string {
+  return isSymmetric(tcs)
+    ? timeControlLabel(tcs.w)
+    : `${timeControlLabel(tcs.w)} · ${timeControlLabel(tcs.b)}`;
 }

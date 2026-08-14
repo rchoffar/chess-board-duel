@@ -1,36 +1,79 @@
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Share, ScrollView } from 'react-native';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useCallback } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
-import { Chess } from 'chess.js';
-import { ChevronLeft, Copy, Share2, Trash2 } from 'lucide-react-native';
-import { GlassCard } from '../../components/ui/GlassCard';
-import { SectionLabel } from '../../components/ui/SectionLabel';
-import { MoveList } from '../../components/chess/MoveList';
+import { ChevronLeft, Copy, Share2, Trash2, Sparkles } from 'lucide-react-native';
+import { GameReplay } from '../../components/chess/GameReplay';
 import { fontFamily, fontSize, radius, spacing } from '../../design-system/theme';
 import { useTheme } from '../../design-system/ThemeProvider';
-import { getGame, deleteGame } from '../../db/games';
-import { timeControlLabel } from '../../chess/clock';
+import { getGame, deleteGame, timeControlsOf } from '../../db/games';
+import { timeControlsLabel } from '../../chess/clock';
+import { parseGamePgn, uciForMove, type ParsedGame } from '../../utils/pgn';
+import { useAnalysisStore } from '../../store/useAnalysisStore';
+import { useEngine } from '../../chess/useEngine';
+
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 export default function GameDetailScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const gameIdNum = Number(id);
 
-  const game = useMemo(() => getGame(Number(id)), [id]);
+  useEngine();
 
-  const moves = useMemo(() => {
-    if (!game?.pgn) return [];
+  const game = useMemo(() => getGame(gameIdNum), [gameIdNum]);
+
+  const parsed: ParsedGame = useMemo(() => {
+    const fallback: ParsedGame = {
+      variant: game?.variant ?? 'standard',
+      startFen: game?.startFen ?? START_FEN,
+      startEngineFen: game?.startFen ?? START_FEN,
+      moves: [],
+    };
+    if (!game?.pgn) return fallback;
     try {
-      const chess = new Chess();
-      chess.loadPgn(game.pgn);
-      return chess.history().map((san) => ({ san }));
+      return parseGamePgn(game.pgn, {
+        variant: game.variant,
+        startFen: game.startFen ?? undefined,
+      });
     } catch {
-      return [];
+      return fallback;
     }
   }, [game]);
+  const replayMoves = parsed.moves;
+
+  // Engine-side FENs: castling rights intact for Stockfish (UCI_Chess960).
+  const fens = useMemo(
+    () => [parsed.startEngineFen, ...replayMoves.map((m) => m.afterEngine)],
+    [parsed, replayMoves]
+  );
+  const playedUcis = useMemo(() => replayMoves.map(uciForMove), [replayMoves]);
+
+  const evals = useAnalysisStore((s) => s.evals);
+  const complete = useAnalysisStore((s) => s.complete);
+  const running = useAnalysisStore((s) => s.running);
+
+  const chess960 = parsed.variant === 'chess960';
+  useEffect(() => {
+    useAnalysisStore.getState().load(gameIdNum, fens, playedUcis, chess960);
+    return () => {
+      useAnalysisStore.getState().clear();
+    };
+  }, [gameIdNum, fens, playedUcis, chess960]);
+
+  // Live eval while scrubbing (skipped once fully analysed or while reviewing).
+  const onPlyChange = useCallback(
+    (ply: number) => {
+      const state = useAnalysisStore.getState();
+      if (!state.complete && !state.running && fens[ply]) {
+        state.evalPly(ply, fens[ply]);
+      }
+    },
+    [fens]
+  );
 
   if (!game) {
     return (
@@ -77,6 +120,17 @@ export default function GameDetailScreen() {
         >
           <ChevronLeft size={18} color={colors.textSecondary} strokeWidth={2} />
         </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={[styles.players, { color: colors.textPrimary }]} numberOfLines={1}>
+            {game.white} vs {game.black}
+          </Text>
+          <Text style={[styles.meta, { color: colors.textTertiary }]}>
+            {game.result === '*' ? 'Unfinished' : game.result}
+            {game.termination ? ` · ${game.termination}` : ''} ·{' '}
+            {timeControlsLabel(timeControlsOf(game))}
+            {game.variant === 'chess960' ? ' · Chess960' : ''}
+          </Text>
+        </View>
         <TouchableOpacity
           style={[styles.iconBtn, { backgroundColor: colors.neutralTileBg }]}
           onPress={confirmDelete}
@@ -86,41 +140,32 @@ export default function GameDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <GlassCard variant="dark">
-        <Text style={[styles.players, { color: colors.onDarkPrimary }]}>
-          {game.white} vs {game.black}
-        </Text>
-        <Text style={[styles.result, { color: colors.accentBright }]}>{game.result === '*' ? 'Unfinished' : game.result}</Text>
-        {game.termination && (
-          <Text style={[styles.meta, { color: colors.onDarkSecondary }]}>{game.termination}</Text>
-        )}
-        <Text style={[styles.meta, { color: colors.onDarkTertiary }]}>
-          {new Date(game.startedAt).toLocaleString()} ·{' '}
-          {timeControlLabel({ baseMinutes: game.baseMinutes, incrementSeconds: game.incrementSeconds })}
-        </Text>
-        <View style={styles.actions}>
-          <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.accentBright }]} onPress={copyPgn} activeOpacity={0.85}>
-            <Copy size={16} color="#0A0A0F" strokeWidth={2} />
-            <Text style={styles.primaryBtnText}>Copy PGN</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.onDarkHairline }]} onPress={sharePgn} activeOpacity={0.85}>
-            <Share2 size={16} color={colors.onDarkPrimary} strokeWidth={2} />
-            <Text style={[styles.secondaryBtnText, { color: colors.onDarkPrimary }]}>Share</Text>
-          </TouchableOpacity>
-        </View>
-      </GlassCard>
+      {replayMoves.length > 0 && (
+        <TouchableOpacity
+          style={[styles.reviewBtn, { backgroundColor: colors.accentTint, borderColor: colors.accent }]}
+          onPress={() => router.push(`/game/review/${game.id}`)}
+          disabled={running}
+          activeOpacity={0.85}
+        >
+          <Sparkles size={16} color={colors.accent} strokeWidth={2} />
+          <Text style={[styles.reviewBtnText, { color: colors.accent }]}>
+            {complete ? 'Game review' : 'Analyse game'}
+          </Text>
+        </TouchableOpacity>
+      )}
 
-      <SectionLabel style={styles.sectionLabel}>Moves</SectionLabel>
-      <GlassCard>
-        <MoveList moves={moves} />
-      </GlassCard>
+      <View style={styles.actions}>
+        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: colors.accentBright }]} onPress={copyPgn} activeOpacity={0.85}>
+          <Copy size={16} color="#0A0A0F" strokeWidth={2} />
+          <Text style={styles.primaryBtnText}>Copy PGN</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.secondaryBtn, { borderColor: colors.hairline }]} onPress={sharePgn} activeOpacity={0.85}>
+          <Share2 size={16} color={colors.textPrimary} strokeWidth={2} />
+          <Text style={[styles.secondaryBtnText, { color: colors.textPrimary }]}>Share</Text>
+        </TouchableOpacity>
+      </View>
 
-      <SectionLabel style={styles.sectionLabel}>PGN</SectionLabel>
-      <GlassCard>
-        <Text style={[styles.pgn, { color: colors.textSecondary }]} selectable>
-          {game.pgn || 'No moves recorded.'}
-        </Text>
-      </GlassCard>
+      <GameReplay replayMoves={replayMoves} startFen={parsed.startFen} evals={evals} onPlyChange={onPlyChange} />
     </ScrollView>
   );
 }
@@ -136,7 +181,12 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
   },
   iconBtn: {
     width: 32,
@@ -146,24 +196,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   players: {
-    fontSize: fontSize.xl,
+    fontSize: fontSize.md,
     fontFamily: fontFamily.bold,
-  },
-  result: {
-    fontSize: fontSize['2xl'],
-    fontFamily: fontFamily.bold,
-    fontVariant: ['tabular-nums'],
-    marginTop: spacing.xs,
   },
   meta: {
-    fontSize: fontSize.sm,
+    fontSize: fontSize.xs,
     fontFamily: fontFamily.regular,
-    marginTop: spacing.xs,
+  },
+  reviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+  },
+  reviewBtnText: {
+    fontSize: fontSize.base,
+    fontFamily: fontFamily.bold,
   },
   actions: {
     flexDirection: 'row',
     gap: spacing.md,
-    marginTop: spacing.base,
   },
   primaryBtn: {
     flex: 1,
@@ -192,13 +247,5 @@ const styles = StyleSheet.create({
   secondaryBtnText: {
     fontSize: fontSize.base,
     fontFamily: fontFamily.semibold,
-  },
-  sectionLabel: {
-    marginTop: spacing.sm,
-  },
-  pgn: {
-    fontSize: fontSize.sm,
-    fontFamily: fontFamily.regular,
-    lineHeight: 20,
   },
 });

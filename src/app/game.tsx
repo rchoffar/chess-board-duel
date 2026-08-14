@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Clipboard from 'expo-clipboard';
-import { Flag, Handshake, X, Copy, AlertTriangle } from 'lucide-react-native';
+import { Flag, Handshake, X, Copy, AlertTriangle, Undo2 } from 'lucide-react-native';
 import { GlassCard } from '../components/ui/GlassCard';
 import { ChessboardView } from '../components/chess/ChessboardView';
 import { ClockDisplay } from '../components/chess/ClockDisplay';
@@ -12,7 +12,7 @@ import { MoveList } from '../components/chess/MoveList';
 import { fontFamily, fontSize, radius, spacing } from '../design-system/theme';
 import { useTheme } from '../design-system/ThemeProvider';
 import { useGameStore } from '../store/useGameStore';
-import { remainingMs } from '../chess/clock';
+import { remainingMs, timeControlLabel } from '../chess/clock';
 import { getGame } from '../db/games';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -27,16 +27,21 @@ export default function GameScreen() {
   const config = useGameStore((s) => s.config);
   const clock = useGameStore((s) => s.clock);
   const fen = useGameStore((s) => s.fen);
+  const startFen = useGameStore((s) => s.startFen);
   const moves = useGameStore((s) => s.moves);
   const illegalSquares = useGameStore((s) => s.illegalSquares);
   const setupSquares = useGameStore((s) => s.setupSquares);
+  const undoSquares = useGameStore((s) => s.undoSquares);
   const result = useGameStore((s) => s.result);
+  const flipped = useGameStore((s) => s.flipped);
   const termination = useGameStore((s) => s.termination);
   const gameId = useGameStore((s) => s.gameId);
   const tick = useGameStore((s) => s.tick);
+  const beginPlay = useGameStore((s) => s.beginPlay);
   const resign = useGameStore((s) => s.resign);
   const agreeDraw = useGameStore((s) => s.agreeDraw);
   const abortGame = useGameStore((s) => s.abortGame);
+  const undoMove = useGameStore((s) => s.undoMove);
   const reset = useGameStore((s) => s.reset);
 
   const [now, setNow] = useState(() => Date.now());
@@ -54,8 +59,9 @@ export default function GameScreen() {
     return null;
   }
 
-  const whiteMs = clock ? remainingMs(clock, 'w', now) : 0;
-  const blackMs = clock ? remainingMs(clock, 'b', now) : 0;
+  // Before the clock exists (setup/ready) show each side's full base time.
+  const whiteMs = clock ? remainingMs(clock, 'w', now) : config.timeControls.w.baseMinutes * 60_000;
+  const blackMs = clock ? remainingMs(clock, 'b', now) : config.timeControls.b.baseMinutes * 60_000;
   const lastMoveSan = moves.length > 0 ? moves[moves.length - 1].san : null;
 
   const confirmResign = () => {
@@ -71,6 +77,13 @@ export default function GameScreen() {
     Alert.alert('Draw', 'Both players agree to a draw?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Agree draw', onPress: () => agreeDraw() },
+    ]);
+  };
+
+  const confirmUndo = () => {
+    Alert.alert('Undo', 'Take back the last move? Both players should agree.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Undo move', onPress: () => undoMove() },
     ]);
   };
 
@@ -112,48 +125,91 @@ export default function GameScreen() {
         >
           <X size={18} color={colors.textSecondary} strokeWidth={2} />
         </TouchableOpacity>
-        <Text style={[styles.topTitle, { color: colors.textSecondary }]}>
+        <Text style={[styles.topTitle, { color: colors.textSecondary }]} numberOfLines={1}>
           {config.white} vs {config.black}
+          {config.variant === 'chess960' ? ' · Chess960' : ''}
         </Text>
         <View style={styles.iconBtn} />
       </View>
 
-      <ClockDisplay name={config.black} remainingMs={blackMs} active={clock?.running === 'b'} flipped />
-
-      <View style={styles.boardWrap}>
-        <ChessboardView
-          fen={fen ?? START_FEN}
-          errorSquares={phase === 'setup' ? setupSquares : illegalSquares}
+      <View style={styles.centerGroup}>
+        {/* Mirror the physical board: the top clock faces the player across the table. */}
+        <ClockDisplay
+          name={flipped ? config.white : config.black}
+          remainingMs={flipped ? whiteMs : blackMs}
+          active={clock?.running === (flipped ? 'w' : 'b')}
+          subtitle={timeControlLabel(flipped ? config.timeControls.w : config.timeControls.b)}
+          flipped
         />
-        {phase === 'setup' && (
-          <View style={[styles.banner, { backgroundColor: colors.neutralTileBg }]}>
-            <Text style={[styles.bannerText, { color: colors.textSecondary }]}>
-              Place all pieces in the starting position
-              {setupSquares.length > 0 ? ` — ${setupSquares.length} square${setupSquares.length > 1 ? 's' : ''} to fix` : ''}
-            </Text>
+
+        <View style={styles.boardWrap}>
+          <ChessboardView
+            fen={fen ?? startFen ?? START_FEN}
+            orientation={flipped ? 'black' : 'white'}
+            errorSquares={phase === 'setup' ? setupSquares : phase === 'undoing' ? undoSquares : illegalSquares}
+          />
+          <View style={styles.bannerSlot}>
+            {phase === 'setup' && (
+              <View style={[styles.banner, { backgroundColor: colors.neutralTileBg }]}>
+                <Text style={[styles.bannerText, { color: colors.textSecondary }]}>
+                  Place all pieces in the starting position
+                  {setupSquares.length > 0 ? ` — ${setupSquares.length} square${setupSquares.length > 1 ? 's' : ''} to fix` : ''}
+                </Text>
+              </View>
+            )}
+            {phase === 'ready' && (
+              <View style={[styles.banner, { backgroundColor: colors.accentTint }]}>
+                <Text style={[styles.bannerText, { color: colors.accent }]}>
+                  Board ready — tap Start when both players are set
+                </Text>
+              </View>
+            )}
+            {phase === 'undoing' && (
+              <View style={[styles.banner, { backgroundColor: colors.accentTint }]}>
+                <Undo2 size={14} color={colors.accent} strokeWidth={2} />
+                <Text style={[styles.bannerText, { color: colors.accent }]}>
+                  Undo — restore the lit squares to resume
+                </Text>
+              </View>
+            )}
+            {phase === 'playing' && illegalSquares.length > 0 && (
+              <View style={[styles.banner, { backgroundColor: 'rgba(229, 72, 77, 0.16)' }]}>
+                <AlertTriangle size={14} color={colors.loss} strokeWidth={2} />
+                <Text style={[styles.bannerText, { color: colors.loss }]}>
+                  Illegal position — put the lit pieces back
+                </Text>
+              </View>
+            )}
+            {phase === 'playing' && illegalSquares.length === 0 && lastMoveSan && (
+              <View style={[styles.banner, { backgroundColor: colors.accentTint }]}>
+                <Text style={[styles.bannerText, { color: colors.accent }]}>
+                  {Math.ceil(moves.length / 2)}. {lastMoveSan}
+                </Text>
+              </View>
+            )}
           </View>
-        )}
-        {phase === 'playing' && illegalSquares.length > 0 && (
-          <View style={[styles.banner, { backgroundColor: 'rgba(229, 72, 77, 0.16)' }]}>
-            <AlertTriangle size={14} color={colors.loss} strokeWidth={2} />
-            <Text style={[styles.bannerText, { color: colors.loss }]}>
-              Illegal position — put the lit pieces back
-            </Text>
-          </View>
-        )}
-        {phase === 'playing' && illegalSquares.length === 0 && lastMoveSan && (
-          <View style={[styles.banner, { backgroundColor: colors.accentTint }]}>
-            <Text style={[styles.bannerText, { color: colors.accent }]}>
-              {Math.ceil(moves.length / 2)}. {lastMoveSan}
-            </Text>
-          </View>
-        )}
+        </View>
+
+        <ClockDisplay
+          name={flipped ? config.black : config.white}
+          remainingMs={flipped ? blackMs : whiteMs}
+          active={clock?.running === (flipped ? 'b' : 'w')}
+          subtitle={timeControlLabel(flipped ? config.timeControls.b : config.timeControls.w)}
+        />
       </View>
 
-      <ClockDisplay name={config.white} remainingMs={whiteMs} active={clock?.running === 'w'} />
+      {phase === 'ready' && (
+        <TouchableOpacity
+          style={[styles.startBtn, { backgroundColor: colors.accentBright }]}
+          onPress={beginPlay}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.startBtnText}>Start game</Text>
+        </TouchableOpacity>
+      )}
 
       {phase === 'finished' ? (
-        <GlassCard variant="dark" style={styles.resultCard}>
+        <GlassCard variant="dark">
           <Text style={[styles.resultText, { color: colors.onDarkPrimary }]}>{result}</Text>
           <Text style={[styles.terminationText, { color: colors.onDarkSecondary }]}>{termination}</Text>
           <View style={styles.resultActions}>
@@ -178,13 +234,32 @@ export default function GameScreen() {
           <View style={styles.movesWrap}>
             <MoveList moves={moves} follow />
           </View>
-          {phase === 'playing' && (
+          {(phase === 'playing' || phase === 'undoing') && (
             <View style={styles.controls}>
-              <TouchableOpacity style={[styles.controlBtn, { backgroundColor: colors.neutralTileBg }]} onPress={confirmDraw} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={[styles.controlBtn, { backgroundColor: colors.neutralTileBg, opacity: moves.length === 0 ? 0.4 : 1 }]}
+                onPress={confirmUndo}
+                disabled={moves.length === 0}
+                activeOpacity={0.8}
+              >
+                <Undo2 size={16} color={colors.textSecondary} strokeWidth={2} />
+                <Text style={[styles.controlText, { color: colors.textSecondary }]}>Undo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.controlBtn, { backgroundColor: colors.neutralTileBg, opacity: phase === 'undoing' ? 0.4 : 1 }]}
+                onPress={confirmDraw}
+                disabled={phase === 'undoing'}
+                activeOpacity={0.8}
+              >
                 <Handshake size={16} color={colors.textSecondary} strokeWidth={2} />
                 <Text style={[styles.controlText, { color: colors.textSecondary }]}>Draw</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.controlBtn, { backgroundColor: colors.neutralTileBg }]} onPress={confirmResign} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={[styles.controlBtn, { backgroundColor: colors.neutralTileBg, opacity: phase === 'undoing' ? 0.4 : 1 }]}
+                onPress={confirmResign}
+                disabled={phase === 'undoing'}
+                activeOpacity={0.8}
+              >
                 <Flag size={16} color={colors.loss} strokeWidth={2} />
                 <Text style={[styles.controlText, { color: colors.loss }]}>Resign</Text>
               </TouchableOpacity>
@@ -208,6 +283,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   topTitle: {
+    flex: 1,
+    textAlign: 'center',
     fontSize: fontSize.sm,
     fontFamily: fontFamily.semibold,
   },
@@ -218,8 +295,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // The clocks + board block floats centered in the leftover vertical space
+  // instead of being top-anchored.
+  centerGroup: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
   boardWrap: {
     gap: spacing.sm,
+  },
+  // Fixed-height slot so banners appearing/disappearing don't shift the board.
+  bannerSlot: {
+    minHeight: 34,
+    justifyContent: 'center',
   },
   banner: {
     flexDirection: 'row',
@@ -235,11 +324,10 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semibold,
   },
   bottom: {
-    flex: 1,
     gap: spacing.md,
   },
   movesWrap: {
-    flex: 1,
+    height: 112,
   },
   controls: {
     flexDirection: 'row',
@@ -258,8 +346,15 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     fontFamily: fontFamily.bold,
   },
-  resultCard: {
-    marginTop: 'auto',
+  startBtn: {
+    borderRadius: radius.md,
+    paddingVertical: spacing.base,
+    alignItems: 'center',
+  },
+  startBtnText: {
+    color: '#0A0A0F',
+    fontSize: fontSize.md,
+    fontFamily: fontFamily.bold,
   },
   resultText: {
     fontSize: fontSize['2xl'],

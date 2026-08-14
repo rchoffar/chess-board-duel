@@ -8,10 +8,14 @@ import {
   formatClock,
   timeControlTag,
   timeControlLabel,
+  timeControlsLabel,
+  isSymmetric,
   type TimeControl,
+  type PlayerTimeControls,
 } from '../clock';
 
-const TC: TimeControl = { baseMinutes: 5, incrementSeconds: 3 };
+const FIVE_THREE: TimeControl = { baseMinutes: 5, incrementSeconds: 3 };
+const TC: PlayerTimeControls = { w: FIVE_THREE, b: FIVE_THREE };
 
 describe('clock', () => {
   it('creates both sides with base time, not running', () => {
@@ -71,8 +75,40 @@ describe('clock', () => {
   });
 
   it('renders PGN tag and label', () => {
-    expect(timeControlTag(TC)).toBe('300+3');
-    expect(timeControlLabel(TC)).toBe('5+3');
+    expect(timeControlTag(FIVE_THREE)).toBe('300+3');
+    expect(timeControlLabel(FIVE_THREE)).toBe('5+3');
     expect(timeControlTag({ baseMinutes: 10, incrementSeconds: 0 })).toBe('600+0');
+  });
+
+  describe('asymmetric time controls', () => {
+    const ASYM: PlayerTimeControls = {
+      w: { baseMinutes: 10, incrementSeconds: 5 },
+      b: { baseMinutes: 5, incrementSeconds: 0 },
+    };
+
+    it('creates each side with its own base time', () => {
+      const c = createClock(ASYM);
+      expect(c.whiteMs).toBe(600_000);
+      expect(c.blackMs).toBe(300_000);
+    });
+
+    it('adds the mover-specific increment on each switch', () => {
+      let c = startClock(createClock(ASYM), 'w', 0);
+      c = switchClock(c, ASYM, 10_000); // white -10s +5s
+      expect(c.whiteMs).toBe(595_000);
+      c = switchClock(c, ASYM, 20_000); // black -10s +0s
+      expect(c.blackMs).toBe(290_000);
+      expect(c.running).toBe('w');
+    });
+
+    it('detects symmetry', () => {
+      expect(isSymmetric(TC)).toBe(true);
+      expect(isSymmetric(ASYM)).toBe(false);
+    });
+
+    it('labels symmetric and asymmetric pairs', () => {
+      expect(timeControlsLabel(TC)).toBe('5+3');
+      expect(timeControlsLabel(ASYM)).toBe('10+5 · 5+0');
+    });
   });
 });

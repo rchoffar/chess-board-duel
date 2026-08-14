@@ -1,13 +1,18 @@
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView } from 'react-native';
-import { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import { SectionLabel } from '../components/ui/SectionLabel';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { Stepper } from '../components/ui/Stepper';
+import { PlayerSelector } from '../components/players/PlayerSelector';
 import { fontFamily, fontSize, radius, spacing } from '../design-system/theme';
 import { useTheme } from '../design-system/ThemeProvider';
 import { useGameStore } from '../store/useGameStore';
+import { createPlayer, listPlayers, type Player } from '../db/players';
+import { listGames } from '../db/games';
+import type { Variant } from '../chess/chess960';
 import type { TimeControl } from '../chess/clock';
 
 const PRESETS: { label: string; tc: TimeControl }[] = [
@@ -19,25 +24,119 @@ const PRESETS: { label: string; tc: TimeControl }[] = [
   { label: '30+0', tc: { baseMinutes: 30, incrementSeconds: 0 } },
 ];
 
+type ClockMode = 'same' | 'perPlayer';
+
+function TimeControlEditor({
+  value,
+  onChange,
+}: {
+  value: TimeControl;
+  onChange: (tc: TimeControl) => void;
+}) {
+  const { colors } = useTheme();
+  const isActive = (tc: TimeControl) =>
+    tc.baseMinutes === value.baseMinutes && tc.incrementSeconds === value.incrementSeconds;
+
+  return (
+    <View style={styles.editor}>
+      <View style={styles.presets}>
+        {PRESETS.map(({ label, tc }) => {
+          const active = isActive(tc);
+          return (
+            <TouchableOpacity
+              key={label}
+              style={[
+                styles.preset,
+                { backgroundColor: active ? colors.accentTint : colors.neutralTileBg },
+                active && { borderColor: colors.accent, borderWidth: 1 },
+              ]}
+              onPress={() => onChange({ ...tc })}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.presetText, { color: active ? colors.accent : colors.textSecondary }]}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      <View style={styles.steppers}>
+        <Stepper
+          label="Minutes"
+          value={value.baseMinutes}
+          min={1}
+          max={120}
+          onDecrement={() =>
+            onChange({ ...value, baseMinutes: Math.max(1, value.baseMinutes - 1) })
+          }
+          onIncrement={() =>
+            onChange({ ...value, baseMinutes: Math.min(120, value.baseMinutes + 1) })
+          }
+        />
+        <Stepper
+          label="Increment (s)"
+          value={value.incrementSeconds}
+          min={0}
+          max={60}
+          onDecrement={() =>
+            onChange({ ...value, incrementSeconds: Math.max(0, value.incrementSeconds - 1) })
+          }
+          onIncrement={() =>
+            onChange({ ...value, incrementSeconds: Math.min(60, value.incrementSeconds + 1) })
+          }
+        />
+      </View>
+    </View>
+  );
+}
+
 export default function NewGameScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const startGame = useGameStore((s) => s.startGame);
 
-  const [baseMinutes, setBaseMinutes] = useState(10);
-  const [incrementSeconds, setIncrementSeconds] = useState(5);
-  const [white, setWhite] = useState('');
-  const [black, setBlack] = useState('');
+  const [variant, setVariant] = useState<Variant>('standard');
+  const [clockMode, setClockMode] = useState<ClockMode>('same');
+  const [whiteTc, setWhiteTc] = useState<TimeControl>({ baseMinutes: 10, incrementSeconds: 5 });
+  const [blackTc, setBlackTc] = useState<TimeControl>({ baseMinutes: 10, incrementSeconds: 5 });
+  const [players, setPlayers] = useState<Player[]>(() => listPlayers());
 
-  const isPresetActive = (tc: TimeControl) =>
-    tc.baseMinutes === baseMinutes && tc.incrementSeconds === incrementSeconds;
+  // Preselect the pairing of the most recent game.
+  const lastGame = useMemo(() => listGames()[0] ?? null, []);
+  const [whiteId, setWhiteId] = useState<number | null>(
+    lastGame?.whiteId != null && players.some((p) => p.id === lastGame.whiteId) ? lastGame.whiteId : null
+  );
+  const [blackId, setBlackId] = useState<number | null>(
+    lastGame?.blackId != null && players.some((p) => p.id === lastGame.blackId) ? lastGame.blackId : null
+  );
+
+  const create = (name: string): Player | null => {
+    const player = createPlayer(name);
+    if (player && !players.some((p) => p.id === player.id)) {
+      setPlayers((prev) => [player, ...prev]);
+    }
+    return player;
+  };
+
+  const nameOf = (id: number | null, fallback: string) =>
+    players.find((p) => p.id === id)?.name ?? fallback;
+
+  const setMode = (mode: ClockMode) => {
+    // Entering per-player mode starts from the shared control.
+    if (mode === 'perPlayer' && clockMode === 'same') setBlackTc({ ...whiteTc });
+    setClockMode(mode);
+  };
 
   const start = () => {
     startGame({
-      white: white.trim() || 'White',
-      black: black.trim() || 'Black',
-      timeControl: { baseMinutes, incrementSeconds },
+      white: nameOf(whiteId, 'White'),
+      black: nameOf(blackId, 'Black'),
+      whiteId,
+      blackId,
+      timeControls: { w: whiteTc, b: clockMode === 'perPlayer' ? blackTc : whiteTc },
+      variant,
     });
     router.replace('/game');
   };
@@ -60,70 +159,47 @@ export default function NewGameScreen() {
           </TouchableOpacity>
         </View>
 
+        <SectionLabel style={styles.label}>Variant</SectionLabel>
+        <SegmentedControl<Variant>
+          options={[
+            { key: 'standard', label: 'Standard' },
+            { key: 'chess960', label: 'Chess960' },
+          ]}
+          value={variant}
+          onChange={setVariant}
+        />
+        {variant === 'chess960' && (
+          <Text style={[styles.hint, { color: colors.textTertiary }]}>
+            Random start position — the app guides the setup with the board LEDs.
+          </Text>
+        )}
+
         <SectionLabel style={styles.label}>Time control</SectionLabel>
-        <View style={styles.presets}>
-          {PRESETS.map(({ label, tc }) => {
-            const active = isPresetActive(tc);
-            return (
-              <TouchableOpacity
-                key={label}
-                style={[
-                  styles.preset,
-                  { backgroundColor: active ? colors.accentTint : colors.neutralTileBg },
-                  active && { borderColor: colors.accent, borderWidth: 1 },
-                ]}
-                onPress={() => {
-                  setBaseMinutes(tc.baseMinutes);
-                  setIncrementSeconds(tc.incrementSeconds);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.presetText, { color: active ? colors.accent : colors.textSecondary }]}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <SegmentedControl<ClockMode>
+          options={[
+            { key: 'same', label: 'Same for both' },
+            { key: 'perPlayer', label: 'Per player' },
+          ]}
+          value={clockMode}
+          onChange={setMode}
+        />
 
-        <View style={styles.steppers}>
-          <Stepper
-            label="Minutes"
-            value={baseMinutes}
-            min={1}
-            max={120}
-            onDecrement={() => setBaseMinutes((v) => Math.max(1, v - 1))}
-            onIncrement={() => setBaseMinutes((v) => Math.min(120, v + 1))}
-          />
-          <Stepper
-            label="Increment (s)"
-            value={incrementSeconds}
-            min={0}
-            max={60}
-            onDecrement={() => setIncrementSeconds((v) => Math.max(0, v - 1))}
-            onIncrement={() => setIncrementSeconds((v) => Math.min(60, v + 1))}
-          />
-        </View>
+        {clockMode === 'same' ? (
+          <TimeControlEditor value={whiteTc} onChange={setWhiteTc} />
+        ) : (
+          <>
+            <SectionLabel style={styles.label}>White clock</SectionLabel>
+            <TimeControlEditor value={whiteTc} onChange={setWhiteTc} />
+            <SectionLabel style={styles.label}>Black clock</SectionLabel>
+            <TimeControlEditor value={blackTc} onChange={setBlackTc} />
+          </>
+        )}
 
-        <SectionLabel style={styles.label}>Players</SectionLabel>
-        <View style={styles.fields}>
-          <TextInput
-            style={[styles.field, { backgroundColor: colors.surface.fieldBg, borderColor: colors.surface.fieldBorder, color: colors.textPrimary }]}
-            placeholder="White player"
-            placeholderTextColor={colors.textTertiary}
-            value={white}
-            onChangeText={setWhite}
-            returnKeyType="next"
-          />
-          <TextInput
-            style={[styles.field, { backgroundColor: colors.surface.fieldBg, borderColor: colors.surface.fieldBorder, color: colors.textPrimary }]}
-            placeholder="Black player"
-            placeholderTextColor={colors.textTertiary}
-            value={black}
-            onChangeText={setBlack}
-            returnKeyType="done"
-          />
-        </View>
+        <SectionLabel style={styles.label}>White</SectionLabel>
+        <PlayerSelector players={players} selectedId={whiteId} onSelect={setWhiteId} onCreate={create} />
+
+        <SectionLabel style={styles.label}>Black</SectionLabel>
+        <PlayerSelector players={players} selectedId={blackId} onSelect={setBlackId} onCreate={create} />
 
         <TouchableOpacity
           style={[styles.startBtn, { backgroundColor: colors.accentBright }]}
@@ -166,6 +242,13 @@ const styles = StyleSheet.create({
   label: {
     marginTop: spacing.md,
   },
+  hint: {
+    fontSize: fontSize.sm,
+    fontFamily: fontFamily.regular,
+  },
+  editor: {
+    gap: spacing.md,
+  },
   presets: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -184,17 +267,6 @@ const styles = StyleSheet.create({
   steppers: {
     gap: spacing.sm,
     marginTop: spacing.sm,
-  },
-  fields: {
-    gap: spacing.sm,
-  },
-  field: {
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.md,
-    fontSize: fontSize.md,
-    fontFamily: fontFamily.medium,
   },
   startBtn: {
     marginTop: spacing.xl,

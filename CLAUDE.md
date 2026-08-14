@@ -1,6 +1,6 @@
-# Chessnut Local
+# Chess Board Duel
 
-iOS-first Expo app that turns a Chessnut Air+ electronic chess board into a local two-player game station: chess clock, move validation with LED feedback, and PGN recording/export (chess.com-compatible).
+iOS-first Expo app (formerly "Chessnut Local") that turns a Chessnut Air+ electronic chess board into a local two-player game station: chess clock, move validation with LED feedback, and PGN recording/export (chess.com-compatible).
 
 ## Commands
 
@@ -14,7 +14,8 @@ iOS-first Expo app that turns a Chessnut Air+ electronic chess board into a loca
 - `src/ble/protocol.ts` — pure Chessnut byte codec (board frames, LED commands, battery). No BLE imports; fully unit-tested. Board frames encode 64 squares × 4-bit piece codes, wire order h8→a1, low nibble first.
 - `src/ble/ChessnutBoard.ts` — BLE transport (react-native-ble-plx): scan by name "Chessnut", subscribe to both notify characteristics, write `21 01 00` to enable real-time mode. LED writes throttled to ≥200 ms.
 - `src/chess/MoveDetector.ts` — the core: the board reports occupancy, not moves. Diffs each frame against a chess.js instance; a position reachable by exactly one legal move is that move; a stable unexplained position (500 ms debounce) is illegal → LEDs light the mismatched squares and the clock does not switch.
-- `src/chess/clock.ts` — pure Fischer clock (`remainingMs` + `turnStartedAt`, no tick drift).
+- `src/chess/chess960.ts` — Chess960 support: Scharnagl position generation, castling-rights tracking, castle legality/apply. chess.js can't represent 960 castles, so 960 games run chess.js with castling field `-` and this module is the only source of castling truth (castles applied via `load()`, so PGN movetext is built from the recorded SAN list, and replays go through `parseGamePgn` in `src/utils/pgn.ts` — never `chess.pgn()`/`loadPgn` directly). Stockfish gets Shredder-castling `engineFen`s + `UCI_Chess960`.
+- `src/chess/clock.ts` — pure Fischer clock (`remainingMs` + `turnStartedAt`, no tick drift). `PlayerTimeControls {w, b}` allows asymmetric clocks; DB stores black's control in nullable columns (NULL = same as white).
 - `src/store/` — zustand: `useBoardStore` (connection, battery, frame fan-out), `useGameStore` (setup → playing → finished orchestration, autosaves PGN to sqlite on every move).
 - `src/db/games.ts` — expo-sqlite repository.
 - `src/design-system/` + `src/components/ui/` — ported from the proker app (`/Users/remy/Perso/proker`), dark scheme only. Styling idiom: static tokens imported into `StyleSheet.create`, only `colors` via `useTheme()` inline.
